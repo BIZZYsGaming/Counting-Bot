@@ -10,7 +10,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(process.env.PORT || 3000, () => {
-  console.log("Keep-alive server running on port 3000");
+  console.log("Keep-alive server running");
 });
 
 // ===== Discord setup =====
@@ -143,4 +143,5 @@ client.on("messageCreate", async (message) => {
 });
 
 client.login(DISCORD_TOKEN);
+
 

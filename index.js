@@ -9,8 +9,10 @@ const server = http.createServer((req, res) => {
   res.end("Bot is running");
 });
 
-server.listen(process.env.PORT || 3000, () => {
-  console.log("Keep-alive server running");
+const PORT = Number(process.env.PORT) || 3000;
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log("Keep-alive server running on port " + PORT);
 });
 
 // ===== Discord setup =====
@@ -143,5 +145,6 @@ client.on("messageCreate", async (message) => {
 });
 
 client.login(DISCORD_TOKEN);
+
 
 

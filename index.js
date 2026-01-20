@@ -3,14 +3,20 @@ const path = require("path");
 const http = require("http");
 const { Client, GatewayIntentBits, PermissionsBitField } = require("discord.js");
 
-// ===== Keep-alive web server (for Replit + UptimeRobot) =====
+// ---- Don't let the process die silently ----
+process.on("unhandledRejection", (err) => console.error("UNHANDLED REJECTION:", err));
+process.on("uncaughtException", (err) => console.error("UNCAUGHT EXCEPTION:", err));
+
+// ===== Keep-alive web server (Replit + UptimeRobot) =====
+const PORT = Number(process.env.PORT) || 3000;
+
 const server = http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("Bot is running");
 });
 
-server.listen(3000, () => {
-  console.log("Keep-alive server running on port 3000");
+server.listen(PORT, "0.0.0.0", () => {
+  console.log("Keep-alive server listening on port " + PORT);
 });
 
 // ===== Discord setup =====
@@ -43,7 +49,6 @@ function loadState() {
     return { current: 0, lastUserId: null };
   }
 }
-
 function saveState(state) {
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), "utf8");
 }
@@ -61,7 +66,6 @@ function loadConfig() {
     return { wrongMessage: "^ Wrong number fuckwit start again\n1" };
   }
 }
-
 function saveConfig(cfg) {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), "utf8");
 }
@@ -75,7 +79,6 @@ async function reset(channel) {
   await channel.send(config.wrongMessage);
 }
 
-// Digits-only check
 function isDigitsOnly(str) {
   return /^[0-9]+$/.test(str);
 }
@@ -86,60 +89,70 @@ client.once("ready", () => {
 });
 
 client.on("messageCreate", async (message) => {
-  if (message.author.bot) return;
-  if (message.channel.id !== COUNTING_CHANNEL_ID) return;
+  try {
+    if (message.author?.bot) return;
+    if (message.channel?.id !== COUNTING_CHANNEL_ID) return;
 
-  // Admin command to change wrong message live
-  if (message.content.toLowerCase().startsWith("!setwrong")) {
-    const canManage = message.member?.permissions?.has(
-      PermissionsBitField.Flags.ManageGuild
-    );
-    if (!canManage) {
-      return message.reply("❌ You don’t have permission to change the wrong message.");
+    // ---- Admin command to change wrong message live ----
+    const rawContent = typeof message.content === "string" ? message.content : "";
+
+    if (rawContent.toLowerCase().startsWith("!setwrong")) {
+      const canManage = message.member?.permissions?.has(
+        PermissionsBitField.Flags.ManageGuild
+      );
+      if (!canManage) {
+        return message.reply("❌ You don’t have permission to change the wrong message.");
+      }
+
+      const newMsg = rawContent.slice("!setwrong".length).trim();
+      if (!newMsg) return message.reply("Usage: `!setwrong your message here`");
+
+      config.wrongMessage = newMsg;
+      saveConfig(config);
+      return message.reply("✅ Wrong message updated (no restart needed).");
     }
 
-    const newMsg = message.content.slice("!setwrong".length).trim();
-    if (!newMsg) return message.reply("Usage: `!setwrong your message here`");
+    // ---- Block non-text posts (images, stickers, links/embeds, etc.) ----
+    const hasAttachments = (message.attachments?.size ?? 0) > 0;
+    const hasStickers = (message.stickers?.size ?? 0) > 0;
+    const hasEmbeds = (message.embeds?.length ?? 0) > 0;
 
-    config.wrongMessage = newMsg;
-    saveConfig(config);
-    return message.reply("✅ Wrong message updated (no restart needed).");
+    // If they posted ANY attachment/sticker/embed, reset immediately
+    if (hasAttachments || hasStickers || hasEmbeds) {
+      return reset(message.channel);
+    }
+
+    const content = rawContent.trim();
+
+    // Empty content (common with some special messages)
+    if (!content) {
+      return reset(message.channel);
+    }
+
+    // Must be digits only
+    if (!isDigitsOnly(content)) {
+      return reset(message.channel);
+    }
+
+    const number = Number(content);
+
+    // No double turns
+    if (state.lastUserId && message.author.id === state.lastUserId) {
+      return reset(message.channel);
+    }
+
+    const expected = state.current + 1;
+    if (number !== expected) {
+      return reset(message.channel);
+    }
+
+    // Correct
+    state.current = number;
+    state.lastUserId = message.author.id;
+    saveState(state);
+  } catch (err) {
+    console.error("Handler error:", err);
   }
-
-  // Block memes / files / stickers / embeds
-  const hasAttachments = message.attachments?.size > 0;
-  const hasStickers = message.stickers?.size > 0;
-  const hasEmbeds = message.embeds?.length > 0;
-  if (hasAttachments || hasStickers || hasEmbeds) {
-    return reset(message.channel);
-  }
-
-  const content = (message.content ?? "").trim();
-  if (!content) {
-    return reset(message.channel);
-  }
-
-  // Must be digits only
-  if (!isDigitsOnly(content)) {
-    return reset(message.channel);
-  }
-
-  const number = Number(content);
-
-  // No double turns
-  if (state.lastUserId && message.author.id === state.lastUserId) {
-    return reset(message.channel);
-  }
-
-  const expected = state.current + 1;
-  if (number !== expected) {
-    return reset(message.channel);
-  }
-
-  // Correct
-  state.current = number;
-  state.lastUserId = message.author.id;
-  saveState(state);
 });
 
 client.login(DISCORD_TOKEN);

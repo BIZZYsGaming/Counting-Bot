@@ -1,7 +1,19 @@
 const fs = require("fs");
 const path = require("path");
+const http = require("http");
 const { Client, GatewayIntentBits, PermissionsBitField } = require("discord.js");
 
+// ===== Keep-alive web server (for Replit + UptimeRobot) =====
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("Bot is running");
+});
+
+server.listen(3000, () => {
+  console.log("Keep-alive server running on port 3000");
+});
+
+// ===== Discord setup =====
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const COUNTING_CHANNEL_ID = process.env.COUNTING_CHANNEL_ID;
 
@@ -16,7 +28,7 @@ const client = new Client({
   ],
 });
 
-// Persist state
+// ===== Persistent files =====
 const STATE_FILE = path.join(__dirname, "count_state.json");
 const CONFIG_FILE = path.join(__dirname, "config.json");
 
@@ -24,13 +36,14 @@ function loadState() {
   try {
     const parsed = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
     return {
-      current: Number.isInteger(parsed.current) ? parsed.current : 0, // last correct; next expected=1
+      current: Number.isInteger(parsed.current) ? parsed.current : 0, // next expected = 1
       lastUserId: typeof parsed.lastUserId === "string" ? parsed.lastUserId : null,
     };
   } catch {
     return { current: 0, lastUserId: null };
   }
 }
+
 function saveState(state) {
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), "utf8");
 }
@@ -48,6 +61,7 @@ function loadConfig() {
     return { wrongMessage: "^ Wrong number fuckwit start again\n1" };
   }
 }
+
 function saveConfig(cfg) {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), "utf8");
 }
@@ -61,7 +75,7 @@ async function reset(channel) {
   await channel.send(config.wrongMessage);
 }
 
-// Digits-only check (NO spaces, NO +/-, NO decimals, NO text)
+// Digits-only check
 function isDigitsOnly(str) {
   return /^[0-9]+$/.test(str);
 }
@@ -75,7 +89,7 @@ client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   if (message.channel.id !== COUNTING_CHANNEL_ID) return;
 
-  // Allow admin to change wrong message live
+  // Admin command to change wrong message live
   if (message.content.toLowerCase().startsWith("!setwrong")) {
     const canManage = message.member?.permissions?.has(
       PermissionsBitField.Flags.ManageGuild
@@ -92,17 +106,15 @@ client.on("messageCreate", async (message) => {
     return message.reply("✅ Wrong message updated (no restart needed).");
   }
 
-  // 🚫 Block memes/images/files/stickers/embeds in counting channel
+  // Block memes / files / stickers / embeds
   const hasAttachments = message.attachments?.size > 0;
   const hasStickers = message.stickers?.size > 0;
-  const hasEmbeds = message.embeds?.length > 0; // often shows for links/gifs
+  const hasEmbeds = message.embeds?.length > 0;
   if (hasAttachments || hasStickers || hasEmbeds) {
     return reset(message.channel);
   }
 
   const content = (message.content ?? "").trim();
-
-  // Empty message (can happen with only sticker/attachment) => reset
   if (!content) {
     return reset(message.channel);
   }
@@ -112,7 +124,6 @@ client.on("messageCreate", async (message) => {
     return reset(message.channel);
   }
 
-  // Convert to number (safe enough for normal counting)
   const number = Number(content);
 
   // No double turns
@@ -121,7 +132,6 @@ client.on("messageCreate", async (message) => {
   }
 
   const expected = state.current + 1;
-
   if (number !== expected) {
     return reset(message.channel);
   }
